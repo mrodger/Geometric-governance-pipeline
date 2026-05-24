@@ -1,0 +1,15 @@
+{"external_id": "skill-001", "category": "coding", "label": "rename_function", "text": "Rename a Python function across all callers in a repository. Use ast to find references rather than text replace, since text replace will match identifiers in strings and comments."}
+{"external_id": "skill-002", "category": "coding", "label": "extract_method", "text": "Pull a block of inline code out into a named method. Identify free variables, decide which become parameters and which become attributes of the enclosing class."}
+{"external_id": "skill-003", "category": "coding", "label": "add_test", "text": "Add a pytest test for a function. Mirror the directory structure of the source tree under tests/. Use parametrize for input matrices."}
+{"external_id": "skill-004", "category": "coding", "label": "fix_import", "text": "Resolve a circular import by hoisting the shared types into a third module that neither original module imports from."}
+{"external_id": "skill-005", "category": "research", "label": "summarise_paper", "text": "Produce a one-page summary of an academic paper covering motivation, method, results, and limitations. Quote numerical results verbatim."}
+{"external_id": "skill-006", "category": "research", "label": "find_sources", "text": "Given a claim, locate three independent sources that support or refute it. Prefer primary sources over secondary."}
+{"external_id": "skill-007", "category": "research", "label": "compare_papers", "text": "Compare two papers on overlapping topics. Identify shared assumptions, methodological differences, and contradictory findings."}
+{"external_id": "skill-008", "category": "gis", "label": "clip_layer", "text": "Clip a WFS layer to the bounding box of an address. Use GeoPandas with the appropriate coordinate reference system."}
+{"external_id": "skill-009", "category": "gis", "label": "reproject", "text": "Reproject a shapefile from EPSG 2193 (NZTM) to EPSG 4326 (WGS84). Preserve attribute table."}
+{"external_id": "skill-010", "category": "gis", "label": "render_map", "text": "Render a Leaflet HTML map from a GeoJSON file. Centre on the feature centroid, set zoom so all features fit."}
+{"external_id": "skill-011", "category": "schedule", "label": "add_calendar_event", "text": "Add an event to a Google Calendar with title, start, end, and optional attendees. Use ISO 8601 timestamps."}
+{"external_id": "skill-012", "category": "schedule", "label": "list_today", "text": "List events on a Google Calendar for today. Include start times in local timezone."}
+{"external_id": "skill-013", "category": "tooling", "label": "ssh_run", "text": "Run a command on a remote host over SSH and capture stdout, stderr, and exit code. Use BatchMode to avoid interactive prompts."}
+{"external_id": "skill-014", "category": "tooling", "label": "tail_log", "text": "Stream the last N lines of a remote log file with follow mode. Reconnect if the SSH session drops."}
+{"external_id": "skill-015", "category": "tooling", "label": "rsync_dir", "text": "Mirror a local directory to a remote host with rsync. Preserve permissions, delete extraneous files on the remote, exclude .git and .venv."}
