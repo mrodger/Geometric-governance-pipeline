@@ -10,17 +10,43 @@ This is the production sister of [Geometric-Semantic-Recursion-](https://github.
 
 Agents need to know whether the action they are about to take belongs in the conversation they are in. Routing decisions, tool access, and compliance checks all depend on that judgement, and string matching is not enough; "schedule a meeting" and "delete the production database" can both arrive as polite, well-formed English.
 
-Classical computer vision solved the equivalent problem for physical space: embed sensor data, segment it into regions, and reason about proximity and membership. This pipeline applies the same approach to language. Every message, tool call, and shell command is projected into a 3D semantic space, compared to known cluster envelopes, and either accepted, flagged, or rejected by geometry rather than by keyword.
+Embedding models give you the right substrate (semantic distance instead of token overlap), but 1536-dimensional cosine queries do not compose with the rest of your stack. You cannot draw an ivfflat index, you cannot ST_Contains a 1536D point against a region of interest, and you cannot show an operator where in the corpus a query landed. The pipeline's job is to keep the accuracy of the high-dimensional space where it matters and shed dimensions everywhere else.
+
+## Working in Lower Dimensions
+
+The pipeline runs in three regimes at once and moves between them deliberately:
+
+1. 1536D embedding space. Every text item starts here. This is where routing happens: cosine similarity against per-cluster centroids picks the neighbourhood, and KNN against per-item embeddings produces the candidate set. 1536D is where two near-synonyms are actually close and where the model's training signal lives. Nothing else preserves that fidelity.
+
+2. Global 3D map (PCA). Once per build, a linear PCA is fit across all 1536D embeddings and stored as `points.geom`. PCA is deterministic, cheap to refit, and stable: adding a new batch of items the next day does not rotate yesterday's layout. The global map is what you show in the overview UI and what cluster centroids live in.
+
+3. Local 3D maps (UMAP, per cluster). Within a single cluster, a nonlinear UMAP is fit on just that cluster's 1536D embeddings and stored as `local_x, local_y, local_z`. UMAP preserves local manifold structure that PCA flattens, so distances inside the cluster mean something. This is the map you use for final-stage retrieval once a query has been routed.
+
+The two-tier split matters because PCA and UMAP are good at different jobs. PCA is honest about global variance and unstable about local neighbourhoods. UMAP is the opposite. Fitting PCA globally and UMAP locally gives a stable overview without sacrificing fine retrieval inside the regions that matter.
+
+## How This Enhances Retrieval
+
+The naive alternative is to KNN the query against every embedding in the corpus and return the top-k. That works, and the pipeline still does it inside the chosen cluster, but it scales badly and gives no spatial context. The two-tier scheme buys four things:
+
+1. Cheap routing. The query is embedded once. A single 1536D cosine pass against the cluster centroids (one row per cluster, not per point) selects the neighbourhood. With one hundred clusters this is a hundred dot products; KNN against the full corpus is one per point. Routing in 1536D against centroids preserves the precision that makes routing work; routing in 3D against centroids does not, because 3D PCA collapses fine semantic structure into noise.
+
+2. Re-rank in 3D, not in 1536D. Once the cluster is locked, the final candidate ranking happens against the local UMAP coordinates with a PostGIS GIST index. A 3D nearest-neighbour query is microseconds. A 1536D cosine scan over the same candidates is milliseconds. The accuracy loss is small because the local UMAP was fit on this cluster's manifold; the speedup compounds at every query.
+
+3. Spatial filters become free. ST_DWithin, ST_Contains, polygon hulls, "near this exemplar", "inside this region of the cluster" are all standard PostGIS in 3D. None of these operations exist in pgvector. A governance rule like "tool calls in the deploy cluster are only allowed within radius R of the canonical examples" is a one-line spatial query in 3D and a research project in 1536D.
+
+4. Visible failure modes. Because the global 3D layout is stable (PCA, not UMAP), a query that lands far from every cluster on the overview map is visibly out-of-distribution; an operator can see it. The envelope verdict (IN, EDGE, OUT) is computed against the local map where the geometry is faithful, but it is displayed on the global map where the audience already has a mental model.
+
+In short: 1536D decides which neighbourhood, 3D decides what happens inside it. The high-dimensional space is used for one cheap query (centroid routing) and one final disambiguation (KNN inside the cluster, if needed). Everything else runs in 3D.
 
 ## What It Does
 
-Each text item is embedded with `text-embedding-3-small` (1536D), projected to 3D via UMAP, and stored with PostGIS geometry and pgvector cosine indexing. The runtime exposes five operations:
+Each text item is embedded with `text-embedding-3-small` (1536D), projected globally via PCA and locally per cluster via UMAP, and stored with PostGIS geometry and pgvector cosine indexing. The runtime exposes five operations:
 
 - search: KNN over 1536D embeddings, with the 3D projection of each hit returned for spatial UI.
 - check: classify a query as IN, EDGE, or OUT of the nearest cluster using rho-coherence (3D distance divided by the cluster's 60th-percentile radius).
 - route: pick the single best (category, label) match.
 - route-multihop: top-k unique labels, deduped, for shortlist-style routing.
-- local: switch from the global UMAP frame to a per-cluster local UMAP, equivalent to a world-to-ego coordinate transform.
+- local: switch from the global PCA frame to a per-cluster local UMAP, used for final-stage retrieval inside the cluster the query was routed to.
 
 The `governance_logger.py` module wraps all five into a fire-and-forget interface for agents. It sanitises secrets, calls the routing endpoint, and writes a SQLite row per event. If the routing service is down, the event is still logged with `envelope_state='unknown'`.
 
@@ -36,8 +62,8 @@ The `governance_logger.py` module wraps all five into a fire-and-forget interfac
   Postgres + pgvector    points table: embedding vector(1536),
       |                  geom geometry(POINTZ, 0)
       v
-  build.py               global UMAP (n=15, min_dist=0.1, seed=42)
-      |                  per-category local UMAP for drill-down
+  build.py               global PCA (stable, linear) -> geom
+      |                  per-category local UMAP (manifold) -> local_xyz
       |                  centroid + r60 cache per cluster
       v
   server.py              FastAPI: /search /check /route
@@ -51,7 +77,7 @@ The `governance_logger.py` module wraps all five into a fire-and-forget interfac
                          or bash command
 ```
 
-PostGIS holds the 3D coordinates in SRID 0 (cartesian semantic space, not geographic). pgvector holds the 1536D embedding for true KNN. The two views are kept in sync by `build.py`; cluster centroids are stored in both spaces so that runtime queries pay only one embedding cost.
+PostGIS holds the 3D coordinates in SRID 0 (cartesian semantic space, not geographic). pgvector holds the 1536D embedding for true KNN. The two views are kept in sync by `build.py`; cluster centroids are stored in both spaces so that runtime queries pay only one embedding cost. Routing happens in 1536D against the centroid table (cheap and accurate); the resulting cluster ID then unlocks the local 3D map for spatial follow-up queries.
 
 ## Pipeline Stages
 
@@ -76,7 +102,7 @@ Embeddings are cached on disk; re-runs only pay for new items. Cost is roughly 0
 python build.py --corpus skills
 ```
 
-Fits a global UMAP, writes 3D coordinates to `points.geom`, fits a per-category local UMAP, and rebuilds the `centroids` table (mean position in 3D, mean embedding in 1536D, 60th-percentile cluster radius). Runtime is dominated by UMAP; expect ~30 seconds for 10k points.
+Fits a global PCA, writes 3D coordinates to `points.geom`, fits a per-category local UMAP into `local_x, local_y, local_z`, and rebuilds the `centroids` table (mean position in 3D, mean embedding in 1536D, 60th-percentile cluster radius). PCA is seconds even at 100k points; runtime is dominated by the per-cluster UMAP fits. Adding a new batch later only requires a fresh PCA pass plus UMAP on the affected clusters.
 
 ### 3. Serve
 

@@ -1,22 +1,28 @@
 """
 build.py - Project a corpus into 3D, compute centroids, write envelopes.
 
+Two-tier dimensional reduction:
+
+  Global map  : PCA (linear, deterministic, stable across rebuilds)
+                Used for the corpus-wide overview and for cluster centroids.
+                Adding new points later does not shift the existing layout.
+  Local maps  : UMAP per category (nonlinear, manifold-preserving)
+                Used for within-cluster geometry where the fine structure
+                matters for retrieval.
+
 Run after ingest.py. Steps:
 
   1. Pull all (id, embedding, category) rows for the corpus from Postgres.
-  2. Fit a global UMAP (n_neighbors=15, min_dist=0.1, seed=42) on the 1536D
-     embeddings and update points.geom with the 3D coordinates.
+  2. Fit a global PCA on the 1536D embeddings and write the 3D projection
+     to points.geom.
   3. For each category, fit a local UMAP on the cluster's embeddings and
-     write local_x, local_y, local_z. This is the "fine-tune after global
-     cluster lock" step used by server.py /local.
+     write local_x, local_y, local_z.
   4. Compute per-category centroids in 1536D (for cheap cluster routing)
      and in 3D (for spatial UI). Cache r60 = 60th percentile distance
      from 3D centroid.
-  5. Optional: compute a convex hull envelope per category in 3D space
-     and store it as a PolygonZ.
 
-Cost: zero (no API calls). Runtime is dominated by UMAP; expect ~30s for
-10k points, ~5min for 100k.
+Cost: zero (no API calls). Runtime is dominated by local UMAP fits;
+expect ~30s for 10k points, ~5min for 100k.
 """
 
 import argparse
@@ -27,6 +33,7 @@ from typing import Iterable
 import numpy as np
 import psycopg2
 import umap
+from sklearn.decomposition import PCA
 
 UMAP_KWARGS = dict(n_components=3, n_neighbors=15, min_dist=0.1, random_state=42)
 
@@ -113,8 +120,8 @@ def main() -> int:
             print(f"no points found for corpus '{args.corpus}'", file=sys.stderr)
             return 1
 
-        print(f"fitting global UMAP on {len(ids)} points...", file=sys.stderr)
-        global_coords = umap.UMAP(**UMAP_KWARGS).fit_transform(vecs)
+        print(f"fitting global PCA on {len(ids)} points...", file=sys.stderr)
+        global_coords = PCA(n_components=3, random_state=42).fit_transform(vecs)
         write_global_geom(cur, ids, global_coords)
         conn.commit()
 

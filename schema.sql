@@ -13,10 +13,13 @@ CREATE TABLE IF NOT EXISTS corpora (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- One point per text item. Geometry is the 3D UMAP projection in SRID 0
--- (cartesian semantic space, not geographic). The 1536D embedding is kept
--- in pgvector for true KNN; the geometry is for spatial UI and PostGIS
--- envelope tests.
+-- One point per text item.
+--   embedding : full 1536D vector, used for routing and true KNN (pgvector).
+--   geom      : global 3D PCA projection (stable, linear, deterministic).
+--               SRID 0 cartesian semantic space, not geographic.
+--   local_*   : per-category 3D UMAP projection, populated by build.py.
+--               Used for in-cluster retrieval and spatial filtering once
+--               a query has been routed to its cluster.
 CREATE TABLE IF NOT EXISTS points (
     id            BIGSERIAL PRIMARY KEY,
     corpus_slug   TEXT NOT NULL REFERENCES corpora(slug) ON DELETE CASCADE,
