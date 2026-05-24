@@ -8,9 +8,11 @@ This is the production sister of [Geometric-Semantic-Recursion-](https://github.
 
 ## Why
 
-Vector search gives you "the single best match for this query" and not much else. That is enough for chatbot prompts and stops being enough the moment you want to govern an agent, debug a corpus, or build a UI a human can read.
+Most agent retrieval today is one of two things: grep over a markdown wiki (the Karpathy-style LLM-readable knowledge base pattern that has caught on this year) or a top-k cosine query against a vector store bolted next to your application DB. Both answer "what is the single best match for this query" well and not much else. That is enough for chatbot prompts; it stops being enough the moment you want to govern an agent, debug a corpus, or build a UI a human can read.
 
-This pipeline keeps the 1536-dimensional embeddings where they matter (routing, true nearest-neighbour, fidelity to the model's training signal) and projects everything into a stable 3D map for the questions cosine similarity cannot answer cleanly. The result is a hybrid retrieval system that behaves like a vector DB when you want one and like a spatial database when you do not.
+This pipeline sits alongside whatever you already have. Every point carries an `external_id` that joins straight back to your existing rows, markdown files, or wiki pages. The embeddings and 3D coordinates are an extra retrieval layer; your source of truth stays where it is. Plug it on top of a Karpathy-style wiki to get fuzzy semantic lookup over what is currently a grep target. Plug it next to your Postgres or pgvector store to get the questions cosine cannot answer cleanly.
+
+What you end up with is a hybrid retrieval surface: 1536D cosine for accurate routing, plus a stable 3D map for everything else.
 
 ## What You Can Ask
 
